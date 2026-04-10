@@ -1,110 +1,147 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
+import subprocess
 import os
 import uuid
 import shutil
-import re
-from scipy import optimize
 
-# ======================================================
-# COPIA DO MOTOR IsoCor (SEM WX)
-# ======================================================
-
-class process:
-    def __init__(self, data_iso, v_measured, meta_form, der_form,
-                 calc_mean_enr, el_excluded, el_pur, el_cor):
-
-        self.err = ""
-        self.data = data_iso
-        self.meta_form = meta_form
-        self.der_form = der_form
-        self.el_excluded = el_excluded
-        self.el_cor = el_cor
-
-        el_dict_meta = self.parse_formula(meta_form)
-        el_dict_der = self.parse_formula(der_form)
-
-        self.nAtom_cor = el_dict_meta[el_cor]
-        correction_vector = self.calc_mdv(el_dict_meta, el_dict_der)
-
-        m_size = len(v_measured)
-
-        self.correction_matrix = np.zeros((m_size, self.nAtom_cor+1))
-
-        for i in range(self.nAtom_cor+1):
-            column = correction_vector[:m_size]
-            for na in range(i):
-                column = np.convolve(column, el_pur)[:m_size]
-            self.correction_matrix[:,i] = column
-
-        mid_ini = np.zeros(self.nAtom_cor+1)
-        v_mes = np.array(v_measured)
-
-        mid, _, _ = optimize.fmin_l_bfgs_b(
-            lambda x: np.sum((v_mes - self.correction_matrix @ x)**2),
-            mid_ini,
-            approx_grad=True
-        )
-
-        self.mid = mid / np.sum(mid)
-
-    def parse_formula(self, f):
-        d = dict((el,0) for el in self.data.keys())
-        for el,n in re.findall(r"([A-Z][a-z]*)([0-9]*)", f):
-            d[el] += int(n) if n else 1
-        return d
-
-    def calc_mdv(self, el_dict_meta, el_dict_der):
-        result = [1.]
-        for el,n in el_dict_meta.items():
-            if el != self.el_cor:
-                for i in range(n):
-                    result = np.convolve(result, self.data[el])
-        return list(result)
-
-# ======================================================
-# STREAMLIT APP
-# ======================================================
-
-st.title("🧪 IsoCor Online (Headless)")
+st.set_page_config(page_title="IsoCor Online", layout="centered")
+st.title("🧪 IsoCor Online Processor")
 
 uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
 
-if uploaded_file and st.button("Run"):
+run = st.button("▶ Run")
 
-    df = pd.read_csv(uploaded_file)
+if uploaded_file and run:
 
-    st.write("Input preview:")
-    st.dataframe(df.head())
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    DATA_DIR = os.path.join(BASE_DIR, "data")
+    ISOCOR_ORIG = os.path.join(BASE_DIR, "IsoCor.py")
 
-    # exemplo simples (você pode adaptar depois)
-    v_measured = df.iloc[:, 2].dropna().values
+    # ======================================================
+    # CREATE WORKDIR
+    # ======================================================
+    run_id = str(uuid.uuid4())
+    workdir = os.path.join(BASE_DIR, f"run_{run_id}")
+    os.makedirs(workdir, exist_ok=True)
 
-    # isotopes dummy (substituir pelos seus .dat depois)
-    isotopes = {
-        "C": [0.989, 0.011],
-        "H": [0.99985, 0.00015],
-        "O": [0.9976, 0.0004, 0.002],
-        "N": [0.9963, 0.0037]
-    }
+    csv_path = os.path.join(workdir, "input.csv")
 
-    try:
-        result = process(
-            isotopes,
-            v_measured,
-            "C6H12O6",
-            "",
-            True,
-            "",
-            [0,1],
-            "C"
+    with open(csv_path, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+
+    st.info("⚙️ Running pipeline...")
+
+    # ======================================================
+    # BEFORE (igual ao seu)
+    # ======================================================
+    dataset = pd.read_csv(csv_path)
+    data = dataset.iloc[:, 2:].apply(pd.to_numeric, errors='coerce')
+
+    samplenames = data.columns.tolist()
+    data.columns = ["Intensity"] * len(samplenames)
+
+    tempcolumn = [""] * len(data)
+    tempcolumn[0] = samplenames[0]
+
+    tempdata = dataset.iloc[:, :2].copy()
+    tempdata["Intensity"] = data.iloc[:, 0]
+
+    outputdataset = pd.concat(
+        [pd.DataFrame({"Sample": tempcolumn}), tempdata],
+        axis=1
+    )
+
+    for i in range(1, len(samplenames)):
+        tempcolumn = [""] * len(data)
+        tempcolumn[0] = samplenames[i]
+        tempdata.iloc[:, 2] = data.iloc[:, i]
+
+        tempdataset = pd.concat(
+            [pd.DataFrame({"Sample": tempcolumn}), tempdata],
+            axis=1
         )
+        outputdataset = pd.concat([outputdataset, tempdataset])
 
-        st.success("Processed!")
+    isocor_file = os.path.join(workdir, "input_isocor.txt")
+    outputdataset.to_csv(isocor_file, sep="\t", index=False, header=False)
 
-        st.write("MID:")
-        st.write(result.mid)
+    # ======================================================
+    # COPY .dat FILES
+    # ======================================================
+    for f in os.listdir(DATA_DIR):
+        shutil.copy(os.path.join(DATA_DIR, f), workdir)
 
-    except Exception as e:
-        st.error(str(e))
+    # ======================================================
+    # PATCH IsoCor (REMOVE WX + GUI)
+    # ======================================================
+    patched_path = os.path.join(workdir, "IsoCor_headless.py")
+
+    with open(ISOCOR_ORIG, "r") as f:
+        code = f.read()
+
+    # REMOVE WX IMPORT
+    code = code.replace("import wx, re, numpy", "import re, numpy")
+
+    # REMOVE GUI EXECUTION
+    code = code.replace("if __name__ == '__main__':\n    gui()", 
+                        "if __name__ == '__main__':\n    print('Headless mode')")
+
+    with open(patched_path, "w") as f:
+        f.write(code)
+
+    # ======================================================
+    # RUN IsoCor (HEADLESS)
+    # ======================================================
+    result = subprocess.run(
+        ["python", "IsoCor_headless.py"],
+        cwd=workdir,
+        capture_output=True,
+        text=True
+    )
+
+    st.text(result.stdout)
+    st.text(result.stderr)
+
+    if result.returncode != 0:
+        st.error("❌ IsoCor failed")
+        st.stop()
+
+    # ======================================================
+    # CHECK OUTPUT
+    # ======================================================
+    res_file = isocor_file.replace("_isocor.txt", "_isocor_res.txt")
+
+    if not os.path.exists(res_file):
+        st.error("❌ Output not generated")
+        st.stop()
+
+    # ======================================================
+    # AFTER (igual ao seu)
+    # ======================================================
+    corrected = pd.read_csv(res_file, sep="\t")
+
+    mult = corrected.shape[0] // len(samplenames)
+    tempoutput = corrected.iloc[:mult, [1, 2, 4]].copy()
+
+    for j in range(2, len(samplenames)+1):
+        start = (j-1)*mult
+        end = j*mult
+        col = corrected.iloc[start:end, 4].reset_index(drop=True)
+        tempoutput = pd.concat([tempoutput, col], axis=1)
+
+    final = pd.concat([
+        tempoutput.iloc[:, :2],
+        dataset.iloc[:, 1:2],
+        tempoutput.iloc[:, 2:]
+    ], axis=1)
+
+    final.columns = list(final.columns[:3]) + samplenames
+
+    output_file = os.path.join(workdir, "result.csv")
+    final.to_csv(output_file, index=False)
+
+    st.success("✅ Done!")
+
+    with open(output_file, "rb") as f:
+        st.download_button("📥 Download result", f, file_name="result.csv")
