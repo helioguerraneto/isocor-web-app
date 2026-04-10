@@ -77,11 +77,19 @@ if uploaded_file and run:
     # ISOCOR (ANTIGO)
     # ======================================================
     try:
-        subprocess.run(
+        result = subprocess.run(
             ["python", "../IsoCor.py"],
             cwd=workdir,
-            check=True
+            capture_output=True,
+            text=True
         )
+        
+        st.text(result.stdout)
+        st.text(result.stderr)
+        
+        if result.returncode != 0:
+            st.error("IsoCor failed")
+            st.stop()
     except Exception as e:
         st.error(f"IsoCor failed: {e}")
         st.stop()
