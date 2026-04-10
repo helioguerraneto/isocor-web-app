@@ -20,10 +20,17 @@ run = st.button("▶ Run")
 if uploaded_file and run:
 
     # ======================================================
+    # PATH BASE (CRÍTICO)
+    # ======================================================
+    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    ISOCOR_PATH = os.path.join(BASE_DIR, "IsoCor.py")
+    DATA_DIR = os.path.join(BASE_DIR, "data")
+
+    # ======================================================
     # ISOLAMENTO
     # ======================================================
     run_id = str(uuid.uuid4())
-    workdir = f"run_{run_id}"
+    workdir = os.path.join(BASE_DIR, f"run_{run_id}")
     os.makedirs(workdir, exist_ok=True)
 
     csv_path = os.path.join(workdir, "input.csv")
@@ -68,33 +75,51 @@ if uploaded_file and run:
     outputdataset.to_csv(isocor_file, sep="\t", index=False, header=False)
 
     # ======================================================
-    # COPIA .dat
+    # COPIA .dat (CORRETO)
     # ======================================================
-    for f in os.listdir("./data"):
-        shutil.copy(os.path.join("data", f), workdir)
+    if not os.path.exists(DATA_DIR):
+        st.error("❌ data/ folder not found")
+        st.stop()
+
+    for f in os.listdir(DATA_DIR):
+        shutil.copy(os.path.join(DATA_DIR, f), workdir)
 
     # ======================================================
-    # ISOCOR (ANTIGO)
+    # PATCH ISOCORE (DESATIVA GUI)
     # ======================================================
-    try:
-        result = subprocess.run(
-            ["python", "../IsoCor.py"],
-            cwd=workdir,
-            capture_output=True,
-            text=True
-        )
-        
-        st.text(result.stdout)
-        st.text(result.stderr)
-        
-        if result.returncode != 0:
-            st.error("IsoCor failed")
-            st.stop()
-    except Exception as e:
-        st.error(f"IsoCor failed: {e}")
+    patched_isocor = os.path.join(workdir, "IsoCor_headless.py")
+
+    with open(ISOCOR_PATH, "r") as original:
+        code = original.read()
+
+    # REMOVE chamada da GUI
+    code = code.replace("gui()", "print('GUI disabled')")
+
+    with open(patched_isocor, "w") as patched:
+        patched.write(code)
+
+    # ======================================================
+    # RUN ISOCORE
+    # ======================================================
+    result = subprocess.run(
+        ["python", "IsoCor_headless.py"],
+        cwd=workdir,
+        capture_output=True,
+        text=True
+    )
+
+    st.text(result.stdout)
+    st.text(result.stderr)
+
+    if result.returncode != 0:
+        st.error("❌ IsoCor failed")
         st.stop()
 
     res_file = isocor_file.replace("_isocor.txt", "_isocor_res.txt")
+
+    if not os.path.exists(res_file):
+        st.error("❌ Output _isocor_res.txt not generated")
+        st.stop()
 
     # ======================================================
     # AFTER
