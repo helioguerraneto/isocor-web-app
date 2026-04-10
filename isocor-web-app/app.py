@@ -70,7 +70,7 @@ if uploaded_file and run:
     # ======================================================
     # COPIA .dat
     # ======================================================
-    for f in os.listdir("data"):
+    for f in os.listdir("./data"):
         shutil.copy(os.path.join("data", f), workdir)
 
     # ======================================================
