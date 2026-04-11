@@ -251,25 +251,25 @@ def run_after(dataset: pd.DataFrame, corrected: pd.DataFrame, samplenames: list)
 # ── UI ────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="IsoCor Online", layout="centered")
 st.title("IsoCor Online")
-st.caption("Pipeline completo: CSV → before → IsoCor → after → resultado")
+st.caption("Workflow: .CSV → BeforeIsoCor → IsoCor → AfterIsoCor → _res.CSV")
 
-with st.expander("Configurações do tracer", expanded=True):
+with st.expander("Tracer Configuration", expanded=True):
     col1, col2 = st.columns(2)
     with col1:
         tracer = st.selectbox("Isotopic tracer", ["C", "N", "H", "O", "S"])
     with col2:
         purity_str = st.text_input(
-            "Purity (separado por ;)",
+            "Purity (spaced by ;)",
             "0.0;1.0",
             help="Ex. para 13C puro: 0.0;1.0 | Para 99% puro: 0.01;0.99",
         )
     col3, col4 = st.columns(2)
     with col3:
         correct_nat_ab = st.selectbox(
-            "Corrigir ab. natural do tracer?", ["yes", "no"]
+            "Correction for nat. ab. of the tracer?", ["yes", "no"]
         )
     with col4:
-        calc_enr = st.selectbox("Calcular mean enrichment?", ["yes", "no"])
+        calc_enr = st.selectbox("Calculate mean enrichment?", ["yes", "no"])
 
 uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
 plot_after = st.radio("Plot after correction?", ["No", "Yes"], horizontal=True)
@@ -303,7 +303,7 @@ if uploaded_file and st.button("▶ Run IsoCor", type="primary"):
 
     dataset = pd.read_csv(uploaded_file)
 
-    with st.spinner("Rodando pipeline..."):
+    with st.spinner("Running pipeline..."):
         # step 1: before
         outputdataset, samplenames, sum_table = run_before(dataset)
 
@@ -323,9 +323,9 @@ if uploaded_file and st.button("▶ Run IsoCor", type="primary"):
         # step 3: after
         final = run_after(dataset, corrected, samplenames)
 
-    st.success("Pronto!")
+    st.success("Done!!")
 
-    tab1, tab2, tab3 = st.tabs(["Resultado (wide)", "Totals", "IsoCor raw"])
+    tab1, tab2, tab3 = st.tabs(["Results (wide)", "Totals", "IsoCor raw"])
     with tab1:
         st.dataframe(final)
         st.download_button(
@@ -354,7 +354,7 @@ if uploaded_file and st.button("▶ Run IsoCor", type="primary"):
     # ── PLOTS ─────────────────────────────────────────────────────────────────
     if plot_after == "Yes":
         st.markdown("---")
-        st.subheader("Isotopologue distribution")
+        st.subheader("Isotopologue Distribution")
 
         # build long-form from corrected: one row per (sample, metabolite, isotopologue)
         plot_df = corrected[corrected["error"] == ""][
