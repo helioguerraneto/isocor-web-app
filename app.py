@@ -6,37 +6,27 @@ import os
 import uuid
 import shutil
 
-st.set_page_config(page_title="IsoCor Online", layout="centered")
-
-st.title("🧪 IsoCor Online Processor")
+st.title("IsoCor Online")
 
 uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
 
-tracer = st.selectbox("Tracer", ["C", "N", "H", "O"])
+tracer = st.selectbox("Tracer", ["C","N","H","O"])
 purity = st.text_input("Purity", "[0.0,1.0]")
 
-run = st.button("▶ Run")
+if uploaded_file and st.button("Run"):
 
-if uploaded_file and run:
-
-    # ======================================================
-    # ISOLAMENTO (cada usuário seu diretório)
-    # ======================================================
     run_id = str(uuid.uuid4())
     workdir = f"run_{run_id}"
     os.makedirs(workdir, exist_ok=True)
 
-    # salva csv
-    input_csv = os.path.join(workdir, "input.csv")
-    with open(input_csv, "wb") as f:
+    csv_path = os.path.join(workdir, "input.csv")
+    with open(csv_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
 
-    st.info("⚙️ Running pipeline...")
-
-    # ======================================================
+    # ======================
     # BEFORE
-    # ======================================================
-    dataset = pd.read_csv(input_csv)
+    # ======================
+    dataset = pd.read_csv(csv_path)
     data = dataset.iloc[:, 2:].apply(pd.to_numeric, errors='coerce')
 
     samplenames = data.columns.tolist()
@@ -67,34 +57,32 @@ if uploaded_file and run:
     isocor_file = os.path.join(workdir, "input_isocor.txt")
     outputdataset.to_csv(isocor_file, sep="\t", index=False, header=False)
 
-    # ======================================================
-    # COPIA .dat PARA WORKDIR
-    # ======================================================
+    # ======================
+    # COPY DAT FILES
+    # ======================
     for f in os.listdir("data"):
         shutil.copy(os.path.join("data", f), workdir)
 
-    # ======================================================
-    # ISOCOR
-    # ======================================================
-    try:
-        subprocess.run(
-            ["python", "IsoCor.py"],
-            cwd=workdir,
-            check=True
-        )
-    except Exception as e:
-        st.error(f"IsoCor failed: {e}")
-        st.stop()
+    # ======================
+    # RUN ISOCOR (MODIFIED)
+    # ======================
+    subprocess.run([
+        "python",
+        "../IsoCor.py",
+        "input_isocor.txt",
+        tracer,
+        purity
+    ], cwd=workdir)
 
-    res_file = isocor_file.replace("_isocor.txt", "_isocor_res.txt")
+    res_file = isocor_file.replace("_isocor.txt","_isocor_res.txt")
 
-    # ======================================================
+    # ======================
     # AFTER
-    # ======================================================
+    # ======================
     corrected = pd.read_csv(res_file, sep="\t")
 
     mult = corrected.shape[0] // len(samplenames)
-    tempoutput = corrected.iloc[:mult, [1, 2, 4]].copy()
+    tempoutput = corrected.iloc[:mult, [1,2,4]].copy()
 
     for j in range(2, len(samplenames)+1):
         start = (j-1)*mult
@@ -113,7 +101,7 @@ if uploaded_file and run:
     output_file = os.path.join(workdir, "result.csv")
     final.to_csv(output_file, index=False)
 
-    st.success("✅ Done!")
+    st.success("Done!")
 
     with open(output_file, "rb") as f:
-        st.download_button("📥 Download result", f, file_name="result.csv")
+        st.download_button("Download result", f)
