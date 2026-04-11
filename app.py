@@ -246,6 +246,7 @@ def run_after(dataset: pd.DataFrame, corrected: pd.DataFrame, samplenames: list)
         tempoutput.iloc[:, 2:].reset_index(drop=True),   # sample columns
     ], axis=1)
 
+    final.iloc[:, 3:] = final.iloc[:, 3:] * 100
     return final
 
 # ── PDF export helper ─────────────────────────────────────────────────────────
