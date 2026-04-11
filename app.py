@@ -248,6 +248,17 @@ def run_after(dataset: pd.DataFrame, corrected: pd.DataFrame, samplenames: list)
 
     return final
 
+# ── PDF export helper ─────────────────────────────────────────────────────────
+def figs_to_pdf(figs: list) -> bytes:
+    """Render a list of matplotlib figures into a single PDF (300 dpi) in memory."""
+    from matplotlib.backends.backend_pdf import PdfPages
+    buf = io.BytesIO()
+    with PdfPages(buf) as pdf:
+        for f in figs:
+            pdf.savefig(f, dpi=300, bbox_inches="tight")
+    buf.seek(0)
+    return buf.read()
+
 # ── UI ────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="IsoCor Online", layout="centered")
 st.title("IsoCor Online")
@@ -360,7 +371,6 @@ if uploaded_file and st.button("▶ Run IsoCor", type="primary"):
         st.markdown("---")
         st.subheader("Isotopologue distribution")
 
-        # build long-form from corrected: one row per (sample, metabolite, isotopologue)
         plot_df = corrected[corrected["error"] == ""][
             ["sample", "metabolite", "isotopologue", "isotopologue_fraction"]
         ].copy()
@@ -369,6 +379,7 @@ if uploaded_file and st.button("▶ Run IsoCor", type="primary"):
         ).fillna(0)
 
         metabolites = plot_df["metabolite"].unique().tolist()
+        bar_figs = []
 
         for meta in metabolites:
             sub = plot_df[plot_df["metabolite"] == meta]
@@ -378,8 +389,6 @@ if uploaded_file and st.button("▶ Run IsoCor", type="primary"):
                 values="isotopologue_fraction",
                 aggfunc="mean",
             ).reindex(columns=sorted(sub["isotopologue"].unique()))
-
-            # keep sample order from original file
             pivot = pivot.reindex([s for s in samplenames if s in pivot.index])
 
             n_iso = pivot.shape[1]
@@ -402,7 +411,17 @@ if uploaded_file and st.button("▶ Run IsoCor", type="primary"):
                       ncol=max(1, n_iso // 5))
             fig.tight_layout()
             st.pyplot(fig)
-            plt.close(fig)
+            bar_figs.append(fig)
+
+        if bar_figs:
+            st.download_button(
+                "⬇ Download stacked bar PDF (300 dpi)",
+                data=figs_to_pdf(bar_figs),
+                file_name=uploaded_file.name.replace(".csv", "_stacked_bar.pdf"),
+                mime="application/pdf",
+            )
+        for f in bar_figs:
+            plt.close(f)
 
     # ── HEATMAP: mean enrichment × metabolite × sample ────────────────────────
     if plot_heatmap == "Yes":
@@ -455,4 +474,11 @@ if uploaded_file and st.button("▶ Run IsoCor", type="primary"):
             ax_h.set_title("Mean enrichment (metabolite × sample)")
             fig_h.tight_layout()
             st.pyplot(fig_h)
+
+            st.download_button(
+                "⬇ Download heatmap PDF (300 dpi)",
+                data=figs_to_pdf([fig_h]),
+                file_name=uploaded_file.name.replace(".csv", "_heatmap.pdf"),
+                mime="application/pdf",
+            )
             plt.close(fig_h)
