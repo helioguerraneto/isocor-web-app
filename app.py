@@ -272,7 +272,11 @@ with st.expander("Configurações do tracer", expanded=True):
         calc_enr = st.selectbox("Calcular mean enrichment?", ["yes", "no"])
 
 uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
-plot_after = st.radio("Plot after correction?", ["No", "Yes"], horizontal=True)
+col_r1, col_r2 = st.columns(2)
+with col_r1:
+    plot_after = st.radio("Plot stacked bar?", ["No", "Yes"], horizontal=True)
+with col_r2:
+    plot_heatmap = st.radio("Plot heatmap?", ["No", "Yes"], horizontal=True)
 
 if uploaded_file and st.button("▶ Run IsoCor", type="primary"):
     # validate purity
@@ -399,3 +403,56 @@ if uploaded_file and st.button("▶ Run IsoCor", type="primary"):
             fig.tight_layout()
             st.pyplot(fig)
             plt.close(fig)
+
+    # ── HEATMAP: mean enrichment × metabolite × sample ────────────────────────
+    if plot_heatmap == "Yes":
+        st.markdown("---")
+        st.subheader("Mean enrichment heatmap")
+
+        if calc_enr != "yes":
+            st.warning("Mean enrichment não foi calculado. Ative 'Calcular mean enrichment' e rode novamente.")
+        else:
+            enr_df = corrected[
+                (corrected["error"] == "") & (corrected["mean_enrichment"] != "")
+            ][["sample", "metabolite", "mean_enrichment"]].copy()
+            enr_df["mean_enrichment"] = pd.to_numeric(enr_df["mean_enrichment"], errors="coerce")
+
+            heatmap_pivot = enr_df.pivot_table(
+                index="metabolite",
+                columns="sample",
+                values="mean_enrichment",
+                aggfunc="mean",
+            )
+            # keep sample order from original file
+            heatmap_pivot = heatmap_pivot.reindex(
+                columns=[s for s in samplenames if s in heatmap_pivot.columns]
+            )
+
+            n_meta   = heatmap_pivot.shape[0]
+            n_sample = heatmap_pivot.shape[1]
+            fig_h, ax_h = plt.subplots(
+                figsize=(max(10, n_sample * 0.35), max(3, n_meta * 0.55))
+            )
+
+            data_arr = heatmap_pivot.values.astype(float)
+            im = ax_h.imshow(data_arr, aspect="auto", cmap="RdYlGn",
+                             vmin=0, vmax=1, interpolation="nearest")
+
+            ax_h.set_xticks(range(n_sample))
+            ax_h.set_xticklabels(heatmap_pivot.columns, rotation=90, fontsize=7)
+            ax_h.set_yticks(range(n_meta))
+            ax_h.set_yticklabels(heatmap_pivot.index, fontsize=9)
+
+            # annotate cells
+            for i in range(n_meta):
+                for j in range(n_sample):
+                    val = data_arr[i, j]
+                    if not np.isnan(val):
+                        ax_h.text(j, i, f"{val:.2f}", ha="center", va="center",
+                                  fontsize=6, color="black")
+
+            plt.colorbar(im, ax=ax_h, label="Mean enrichment", shrink=0.6)
+            ax_h.set_title("Mean enrichment (metabolite × sample)")
+            fig_h.tight_layout()
+            st.pyplot(fig_h)
+            plt.close(fig_h)
