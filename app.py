@@ -261,49 +261,53 @@ def figs_to_pdf(figs: list) -> bytes:
 
 # ── TABULATE: _res.csv → _res_tabu.csv ───────────────────────────────────────
 def run_tabulate(final: pd.DataFrame, reps: int = 3) -> pd.DataFrame:
-    """
-    Reshape final into tabulated format.
-    Reads metabolites and peak counts directly from final.
-    Groups every `reps` consecutive sample columns into one row.
-    Column names: Metabolite, M0_r1, M0_r2, M0_r3, M1_r1, M1_r2, M1_r3, ...
-    """
-    res = final.copy()
-    res["Metabolite"] = res["Metabolite"].ffill()
+    import re
 
-    # sample columns = everything after Metabolite, Peak index, derivative (col 0,1,2)
-    sample_cols = list(res.columns[3:])
+    df = final.copy()
+    df["Metabolite"] = df["Metabolite"].ffill()
+    df = df.dropna(subset=["Peak index"])
+    df["Peak index"] = df["Peak index"].astype(int)
+
+    sample_cols = list(df.columns[3:])
     n_samples   = len(sample_cols)
     n_rows      = n_samples // reps
 
-    metabolites_order = list(dict.fromkeys(res["Metabolite"].tolist()))
+    # build condition list dynamically from sample count
+    # (user can override via reps; conditions are positional)
+    todas_linhas = []
 
-    # max peaks across all metabolites
-    max_peaks = max(
-        len(res[res["Metabolite"] == m]) for m in metabolites_order
+    for metabolito in df["Metabolite"].unique():
+        dados_metab = df[df["Metabolite"] == metabolito].copy()
+        dados_metab = dados_metab.sort_values("Peak index").reset_index(drop=True)
+
+        for idx_cond in range(n_rows):
+            inicio = idx_cond * reps
+            samples_cond = sample_cols[inicio : inicio + reps]
+
+            linha = {"Metabolite": metabolito}
+
+            for _, row in dados_metab.iterrows():
+                peak_idx = int(row["Peak index"])
+                for rep, sample in enumerate(samples_cond, 1):
+                    col_name = f"M{peak_idx}_r{rep}"
+                    valor = row[sample]
+                    linha[col_name] = "" if pd.isna(valor) else valor
+
+            todas_linhas.append(linha)
+
+    df_result = pd.DataFrame(todas_linhas).fillna("")
+
+    # sort columns: Metabolite first, then M0_r1, M0_r2, M0_r3, M1_r1, ...
+    def sort_peak_col(col):
+        match = re.match(r"M(\d+)_r(\d+)", col)
+        return (int(match.group(1)), int(match.group(2))) if match else (999, 999)
+
+    colunas_fixas = ["Metabolite"]
+    colunas_peaks = sorted(
+        [c for c in df_result.columns if c not in colunas_fixas],
+        key=sort_peak_col,
     )
-
-    # header with unique names: Metabolite, M0_r1, M0_r2, M0_r3, M1_r1, ...
-    header = ["Metabolite"]
-    for p in range(max_peaks):
-        for r in range(1, reps + 1):
-            header.append(f"M{p}_r{r}")
-
-    output_rows = []
-    for meta_name in metabolites_order:
-        sub = res[res["Metabolite"] == meta_name].reset_index(drop=True)
-        n_peaks = len(sub)
-
-        for row_i in range(n_rows):
-            s_names = [sample_cols[row_i * reps + r] for r in range(reps)]
-            row = [meta_name]
-            for p in range(max_peaks):
-                if p < n_peaks:
-                    row += sub.loc[p, s_names].tolist()
-                else:
-                    row += [""] * reps
-            output_rows.append(row)
-
-    return pd.DataFrame(output_rows, columns=header)
+    return df_result[colunas_fixas + colunas_peaks]
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="IsoCor Online", layout="centered")
@@ -413,11 +417,14 @@ if uploaded_file and st.button("▶ Run IsoCor", type="primary"):
     with tab_tabu:
         if tabu is not None:
             st.dataframe(tabu)
+            buf = io.BytesIO()
+            tabu.to_excel(buf, index=False)
+            buf.seek(0)
             st.download_button(
-                "⬇ Download _res_tabu.csv",
-                tabu.to_csv(index=False).encode("utf-8"),
-                file_name=uploaded_file.name.replace(".csv", "_res_tabu.csv"),
-                mime="text/csv",
+                "⬇ Download _res_tabu.xlsx",
+                buf.read(),
+                file_name=uploaded_file.name.replace(".csv", "_res_tabu.xlsx"),
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
         else:
             st.error("Erro ao gerar tabulação.")
