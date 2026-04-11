@@ -216,9 +216,7 @@ def run_after(dataset: pd.DataFrame, corrected: pd.DataFrame, samplenames: list)
 
     tempoutput2.columns = list(tempoutput2.columns[:3]) + samplenames
 
-    col_index = 2
-    mask = tempoutput2.iloc[:, col_index].isna()
-    tempoutput2.iloc[mask.values, col_index] = ""
+    # col_index 2 is numeric — leave NaN as-is (no string replacement needed)
 
     return tempoutput2
 
