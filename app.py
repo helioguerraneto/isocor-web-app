@@ -1,41 +1,42 @@
 import streamlit as st
 import pandas as pd
+import numpy as np
 import subprocess
 import os
 import uuid
 import shutil
 
 st.set_page_config(page_title="IsoCor Online", layout="centered")
+
 st.title("🧪 IsoCor Online Processor")
 
 uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+
+tracer = st.selectbox("Tracer", ["C", "N", "H", "O"])
+purity = st.text_input("Purity", "[0.0,1.0]")
 
 run = st.button("▶ Run")
 
 if uploaded_file and run:
 
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    DATA_DIR = os.path.join(BASE_DIR, "data")
-    ISOCOR_ORIG = os.path.join(BASE_DIR, "IsoCor.py")
-
     # ======================================================
-    # CREATE WORKDIR
+    # ISOLAMENTO (cada usuário seu diretório)
     # ======================================================
     run_id = str(uuid.uuid4())
-    workdir = os.path.join(BASE_DIR, f"run_{run_id}")
+    workdir = f"run_{run_id}"
     os.makedirs(workdir, exist_ok=True)
 
-    csv_path = os.path.join(workdir, "input.csv")
-
-    with open(csv_path, "wb") as f:
+    # salva csv
+    input_csv = os.path.join(workdir, "input.csv")
+    with open(input_csv, "wb") as f:
         f.write(uploaded_file.getbuffer())
 
     st.info("⚙️ Running pipeline...")
 
     # ======================================================
-    # BEFORE (igual ao seu)
+    # BEFORE
     # ======================================================
-    dataset = pd.read_csv(csv_path)
+    dataset = pd.read_csv(input_csv)
     data = dataset.iloc[:, 2:].apply(pd.to_numeric, errors='coerce')
 
     samplenames = data.columns.tolist()
@@ -67,57 +68,28 @@ if uploaded_file and run:
     outputdataset.to_csv(isocor_file, sep="\t", index=False, header=False)
 
     # ======================================================
-    # COPY .dat FILES
+    # COPIA .dat PARA WORKDIR
     # ======================================================
-    for f in os.listdir(DATA_DIR):
-        shutil.copy(os.path.join(DATA_DIR, f), workdir)
-
-    # ======================================================
-    # PATCH IsoCor (REMOVE WX + GUI)
-    # ======================================================
-    patched_path = os.path.join(workdir, "IsoCor_headless.py")
-
-    with open(ISOCOR_ORIG, "r") as f:
-        code = f.read()
-
-    # REMOVE WX IMPORT
-    code = code.replace("import wx, re, numpy", "import re, numpy")
-
-    # REMOVE GUI EXECUTION
-    code = code.replace("if __name__ == '__main__':\n    gui()", 
-                        "if __name__ == '__main__':\n    print('Headless mode')")
-
-    with open(patched_path, "w") as f:
-        f.write(code)
+    for f in os.listdir("data"):
+        shutil.copy(os.path.join("data", f), workdir)
 
     # ======================================================
-    # RUN IsoCor (HEADLESS)
+    # ISOCOR
     # ======================================================
-    result = subprocess.run(
-        ["python", "IsoCor_headless.py"],
-        cwd=workdir,
-        capture_output=True,
-        text=True
-    )
-
-    st.text(result.stdout)
-    st.text(result.stderr)
-
-    if result.returncode != 0:
-        st.error("❌ IsoCor failed")
+    try:
+        subprocess.run(
+            ["python", "IsoCor.py"],
+            cwd=workdir,
+            check=True
+        )
+    except Exception as e:
+        st.error(f"IsoCor failed: {e}")
         st.stop()
 
-    # ======================================================
-    # CHECK OUTPUT
-    # ======================================================
     res_file = isocor_file.replace("_isocor.txt", "_isocor_res.txt")
 
-    if not os.path.exists(res_file):
-        st.error("❌ Output not generated")
-        st.stop()
-
     # ======================================================
-    # AFTER (igual ao seu)
+    # AFTER
     # ======================================================
     corrected = pd.read_csv(res_file, sep="\t")
 
