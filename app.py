@@ -4,6 +4,8 @@ import numpy as np
 import os
 import sys
 import io
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
 # ── import IsoCor process class ─────────────────────────────────────────────
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -270,6 +272,7 @@ with st.expander("Configurações do tracer", expanded=True):
         calc_enr = st.selectbox("Calcular mean enrichment?", ["yes", "no"])
 
 uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
+plot_after = st.radio("Plot after correction?", ["No", "Yes"], horizontal=True)
 
 if uploaded_file and st.button("▶ Run IsoCor", type="primary"):
     # validate purity
@@ -347,3 +350,52 @@ if uploaded_file and st.button("▶ Run IsoCor", type="primary"):
             file_name=uploaded_file.name.replace(".csv", "_isocor_res.txt"),
             mime="text/plain",
         )
+
+    # ── PLOTS ─────────────────────────────────────────────────────────────────
+    if plot_after == "Yes":
+        st.markdown("---")
+        st.subheader("Isotopologue distribution")
+
+        # build long-form from corrected: one row per (sample, metabolite, isotopologue)
+        plot_df = corrected[corrected["error"] == ""][
+            ["sample", "metabolite", "isotopologue", "isotopologue_fraction"]
+        ].copy()
+        plot_df["isotopologue_fraction"] = pd.to_numeric(
+            plot_df["isotopologue_fraction"], errors="coerce"
+        ).fillna(0)
+
+        metabolites = plot_df["metabolite"].unique().tolist()
+
+        for meta in metabolites:
+            sub = plot_df[plot_df["metabolite"] == meta]
+            pivot = sub.pivot_table(
+                index="sample",
+                columns="isotopologue",
+                values="isotopologue_fraction",
+                aggfunc="mean",
+            ).reindex(columns=sorted(sub["isotopologue"].unique()))
+
+            # keep sample order from original file
+            pivot = pivot.reindex([s for s in samplenames if s in pivot.index])
+
+            n_iso = pivot.shape[1]
+            colors = cm.tab10.colors[:n_iso] if n_iso <= 10 else cm.tab20.colors[:n_iso]
+
+            fig, ax = plt.subplots(figsize=(max(8, len(pivot) * 0.35), 4))
+            bottom = np.zeros(len(pivot))
+            for idx, iso in enumerate(pivot.columns):
+                vals = pivot[iso].fillna(0).values
+                ax.bar(range(len(pivot)), vals, bottom=bottom,
+                       color=colors[idx], label=f"m+{iso}", width=0.8)
+                bottom += vals
+
+            ax.set_xticks(range(len(pivot)))
+            ax.set_xticklabels(pivot.index, rotation=90, fontsize=7)
+            ax.set_ylabel("Isotopologue fraction")
+            ax.set_ylim(0, 1)
+            ax.set_title(meta)
+            ax.legend(loc="upper right", fontsize=8, framealpha=0.7,
+                      ncol=max(1, n_iso // 5))
+            fig.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
