@@ -261,10 +261,10 @@ def figs_to_pdf(figs: list) -> bytes:
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="IsoCor Online", layout="centered")
-st.title("IsoCor Online")
-st.caption("Pipeline completo: CSV → before → IsoCor → after → resultado")
+st.title("IsoCor Online 1.0")
+st.caption("Workflow:  .CSV → BeforeIsoCor → IsoCor → AfterIsoCor → _res.CSV")
 
-with st.expander("Configurações do tracer", expanded=True):
+with st.expander("Tracer Configuration", expanded=True):
     col1, col2 = st.columns(2)
     with col1:
         tracer = st.selectbox("Isotopic tracer", ["C", "N", "H", "O", "S"])
