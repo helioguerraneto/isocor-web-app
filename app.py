@@ -91,96 +91,102 @@ def run_isocor(outputdataset, isotop, dict_form_meta, dict_form_der,
                el_cor, purity, el_excluded, calc_enr):
     """
     Mimics what IsoCor.py does in batch mode.
+    Reads outputdataset sequentially just like the original IsoCor file parser:
+      - col0: sample name (non-empty only on first row of each metabolite block)
+      - col1: metabolite name
+      - col2: derivative name
+      - col3: intensity value
     Returns a DataFrame equivalent to _isocor_res.txt.
     """
     rows = []
-    sample_col = outputdataset.columns[0]   # "Sample"
+    sample_col = outputdataset.columns[0]
     meta_col   = outputdataset.columns[1]
     der_col    = outputdataset.columns[2]
     int_col    = outputdataset.columns[3]
 
-    # group by (meta_name, der_name) — preserving original order
-    seen = []
-    for _, row in outputdataset.iterrows():
-        key = (str(row[meta_col]).strip(), str(row[der_col]).strip())
-        if key not in seen:
-            seen.append(key)
+    df = outputdataset.reset_index(drop=True)
 
-    for (meta_name, der_name) in seen:
-        mask = (
-            outputdataset[meta_col].astype(str).str.strip() == meta_name
-        ) & (
-            outputdataset[der_col].astype(str).str.strip() == der_name
-        )
-        block = outputdataset[mask].copy()
+    # Build list of (sample, meta, der, [v_mes]) by parsing sequentially
+    # exactly as the original IsoCor cmd_parse_multiple does
+    current_sample = ""
+    jobs = []   # list of dicts: {sample, meta, der, v_mes}
 
-        # each sample is a contiguous slice of this block
-        # the "Sample" column has the name on the first row only
-        sample_names_block = block[sample_col].replace("", np.nan).ffill().tolist()
-        unique_samples = list(dict.fromkeys(sample_names_block))
+    for _, row in df.iterrows():
+        s_val = str(row[sample_col]).strip()
+        m_val = str(row[meta_col]).strip()
+        d_val = str(row[der_col]).strip()
+        i_val = row[int_col]
 
-        nrows_per_sample = len(block) // len(unique_samples)
+        # new sample name on this row?
+        if s_val and s_val.lower() != "nan":
+            current_sample = s_val
 
-        for sample in unique_samples:
-            s_mask = [s == sample for s in sample_names_block]
-            v_mes  = block[int_col][mask].values  # reuse outer mask? No:
-            # safer: slice by position
-            sidx   = [i for i, s in enumerate(sample_names_block) if s == sample]
-            v_mes  = block.iloc[sidx][int_col].apply(
-                lambda x: float(str(x).replace(",", ".")) if str(x).strip() not in ("", "nan") else 0.0
-            ).tolist()
+        # parse intensity
+        try:
+            intensity = float(str(i_val).replace(",", "."))
+        except (ValueError, TypeError):
+            intensity = 0.0
 
-            if meta_name not in dict_form_meta:
-                for i, v in enumerate(v_mes):
-                    rows.append({
-                        "sample": sample, "metabolite": meta_name,
-                        "derivative": der_name, "isotopologue": i,
-                        "isotopologue_fraction": np.nan,
-                        "residuum": np.nan, "mean_enrichment": np.nan,
-                        "error": f"metabolite not found in Metabolites.dat",
-                    })
-                continue
+        # new metabolite block starts when meta_name is non-empty
+        if m_val and m_val.lower() != "nan":
+            jobs.append({
+                "sample": current_sample,
+                "meta":   m_val,
+                "der":    d_val if d_val.lower() != "nan" else "",
+                "v_mes":  [intensity],
+            })
+        else:
+            # continuation row — append intensity to current job
+            if jobs:
+                jobs[-1]["v_mes"].append(intensity)
 
-            meta_form = dict_form_meta[meta_name]
-            der_form  = dict_form_der.get(der_name, "")
+    # now run process() on each job
+    for job in jobs:
+        sample    = job["sample"]
+        meta_name = job["meta"]
+        der_name  = job["der"]
+        v_mes     = job["v_mes"]
 
-            try:
-                res = process(
-                    isotop, v_mes, meta_form, der_form,
-                    calc_enr, el_excluded, purity, el_cor
-                )
-            except Exception as e:
-                for i, v in enumerate(v_mes):
-                    rows.append({
-                        "sample": sample, "metabolite": meta_name,
-                        "derivative": der_name, "isotopologue": i,
-                        "isotopologue_fraction": np.nan,
-                        "residuum": np.nan, "mean_enrichment": np.nan,
-                        "error": str(e),
-                    })
-                continue
-
-            if res.err:
-                for i, v in enumerate(v_mes):
-                    rows.append({
-                        "sample": sample, "metabolite": meta_name,
-                        "derivative": der_name, "isotopologue": i,
-                        "isotopologue_fraction": np.nan,
-                        "residuum": np.nan, "mean_enrichment": np.nan,
-                        "error": res.err,
-                    })
-                continue
-
-            total = sum(v_mes)
-            for i, (mid_val, resid_val) in enumerate(zip(res.mid, res.residuum)):
+        def append_error(msg):
+            for i in range(len(v_mes)):
                 rows.append({
                     "sample": sample, "metabolite": meta_name,
                     "derivative": der_name, "isotopologue": i,
-                    "isotopologue_fraction": round(mid_val, 5),
-                    "residuum": round(resid_val / total, 5) if total else resid_val,
-                    "mean_enrichment": round(res.enr_calc, 4) if calc_enr and i == 0 else "",
-                    "error": "",
+                    "isotopologue_fraction": np.nan,
+                    "residuum": np.nan, "mean_enrichment": np.nan,
+                    "error": msg,
                 })
+
+        if meta_name not in dict_form_meta:
+            append_error(f"metabolite '{meta_name}' not found in Metabolites.dat")
+            continue
+
+        meta_form = dict_form_meta[meta_name]
+        der_form  = dict_form_der.get(der_name, "")
+
+        try:
+            res = process(
+                isotop, v_mes, meta_form, der_form,
+                calc_enr, el_excluded, purity, el_cor
+            )
+        except Exception as e:
+            append_error(str(e))
+            continue
+
+        if res.err:
+            append_error(res.err)
+            continue
+
+        total = sum(v_mes)
+        for i, (mid_val, resid_val) in enumerate(zip(res.mid, res.residuum)):
+            rows.append({
+                "sample": sample, "metabolite": meta_name,
+                "derivative": der_name, "isotopologue": i,
+                "isotopologue_fraction": round(mid_val, 5),
+                "residuum": round(resid_val / total, 5) if total else resid_val,
+                "mean_enrichment": round(res.enr_calc, 4) if calc_enr and i == 0 else "",
+                "error": "",
+            })
 
     cols = ["sample", "metabolite", "derivative", "isotopologue",
             "isotopologue_fraction", "residuum", "mean_enrichment", "error"]
