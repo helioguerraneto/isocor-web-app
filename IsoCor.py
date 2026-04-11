@@ -24,7 +24,7 @@ For further information refer to 'IsoCor_Tutorial.pdf'.
 # ----------Import modules--------------------------------------------------#
 #############################################################################
 
-import wx, re, numpy
+import re, numpy
 from time import gmtime, strftime
 from scipy import optimize
 
