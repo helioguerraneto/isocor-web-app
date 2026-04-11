@@ -246,7 +246,6 @@ def run_after(dataset: pd.DataFrame, corrected: pd.DataFrame, samplenames: list)
         tempoutput.iloc[:, 2:].reset_index(drop=True),   # sample columns
     ], axis=1)
 
-    final.iloc[:, 3:] = final.iloc[:, 3:] * 100
     return final
 
 # ── PDF export helper ─────────────────────────────────────────────────────────
@@ -260,12 +259,67 @@ def figs_to_pdf(figs: list) -> bytes:
     buf.seek(0)
     return buf.read()
 
+# ── TABULATE: _res.csv → _res_tabu.csv ───────────────────────────────────────
+def run_tabulate(final: pd.DataFrame, metadata_rows: pd.DataFrame,
+                 metabolites_order: list, reps: int = 3) -> pd.DataFrame:
+    """
+    Reshape final (_res wide format) into the tabulated format:
+      rows    = metabolite × 24 metadata combinations
+      columns = Metabolite, Timepoint, Condition, Group,
+                M0(rep1, rep2, rep3), M1(rep1,rep2,rep3), ...
+    metadata_rows: DataFrame with columns [Timepoint, Condition, Group], 24 rows.
+    reps: number of replicates per metadata row (default 3).
+    """
+    # fill metabolite name downward in final
+    res_filled = final.copy()
+    res_filled["Metabolite"] = res_filled["Metabolite"].ffill()
+
+    sample_cols = [c for c in res_filled.columns
+                   if c not in ["Metabolite", "Peak index", res_filled.columns[2]]]
+    n_samples = len(sample_cols)
+    n_rows    = n_samples // reps
+
+    # max peaks across all metabolites (determines column width)
+    max_peaks = 0
+    for m in metabolites_order:
+        sub = res_filled[res_filled["Metabolite"].str.lower() == m.lower()]
+        max_peaks = max(max_peaks, len(sub))
+
+    # build header: Metabolite, Timepoint, Condition, Group, M0,,, M1,,, ...
+    header = ["Metabolite", "Timepoint", "Condition", "Group"]
+    for p in range(max_peaks):
+        header += [f"M{p}", "", ""]
+
+    output_rows = []
+    for meta_name in metabolites_order:
+        sub = res_filled[
+            res_filled["Metabolite"].str.lower() == meta_name.lower()
+        ].reset_index(drop=True)
+        n_peaks = len(sub)
+
+        for row_i in range(n_rows):
+            s_names = [sample_cols[row_i * reps + r] for r in range(reps)]
+            row = [
+                meta_name,
+                metadata_rows.iloc[row_i]["Timepoint"],
+                metadata_rows.iloc[row_i]["Condition"],
+                metadata_rows.iloc[row_i]["Group"],
+            ]
+            for p in range(max_peaks):
+                if p < n_peaks:
+                    row += sub.loc[p, s_names].tolist()
+                else:
+                    row += ["", "", ""]
+            output_rows.append(row)
+
+    return pd.DataFrame(output_rows, columns=header)
+
 # ── UI ────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="IsoCor Online", layout="centered")
-st.title("IsoCor Online 1.0")
-st.caption("Workflow:  .CSV → BeforeIsoCor → IsoCor → AfterIsoCor → _res.CSV")
+st.title("IsoCor Online")
+st.caption("Pipeline completo: CSV → before → IsoCor → after → resultado")
 
-with st.expander("Tracer Configuration", expanded=True):
+with st.expander("Configurações do tracer", expanded=True):
     col1, col2 = st.columns(2)
     with col1:
         tracer = st.selectbox("Isotopic tracer", ["C", "N", "H", "O", "S"])
@@ -366,6 +420,48 @@ if uploaded_file and st.button("▶ Run IsoCor", type="primary"):
             file_name=uploaded_file.name.replace(".csv", "_isocor_res.txt"),
             mime="text/plain",
         )
+
+    # ── TABULATE ──────────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("Tabulate (_res_tabu.csv)")
+
+    with st.expander("Configurar tabulação", expanded=True):
+        st.caption("Upload de um xlsx com as 24 linhas de metadados (sem header): Timepoint | Condition | Group")
+        meta_file = st.file_uploader("Upload metadata xlsx (24 linhas × 3 colunas)",
+                                     type=["xlsx"], key="meta_upload")
+
+        meta_order_str = st.text_input(
+            "Ordem dos metabolitos (separado por vírgula)",
+            value=", ".join(final["Metabolite"].dropna().unique().tolist()),
+            help="Edite a ordem desejada das linhas no output",
+        )
+        reps_input = st.number_input("Réplicas por grupo", min_value=1, max_value=10,
+                                     value=3, step=1)
+
+    if meta_file and st.button("▶ Tabulate", type="secondary"):
+        try:
+            meta_xl = pd.read_excel(meta_file, header=None)
+            # accept either 3 or 4 columns (with or without metabolite col)
+            if meta_xl.shape[1] >= 4:
+                meta_rows = meta_xl.iloc[:, 1:4].copy()
+            else:
+                meta_rows = meta_xl.iloc[:, :3].copy()
+            meta_rows.columns = ["Timepoint", "Condition", "Group"]
+            meta_rows = meta_rows.ffill().reset_index(drop=True)
+
+            metabolites_order = [m.strip() for m in meta_order_str.split(",") if m.strip()]
+
+            tabu = run_tabulate(final, meta_rows, metabolites_order, reps=int(reps_input))
+
+            st.dataframe(tabu)
+            st.download_button(
+                "⬇ Download _res_tabu.csv",
+                tabu.to_csv(index=False).encode("utf-8"),
+                file_name=uploaded_file.name.replace(".csv", "_res_tabu.csv"),
+                mime="text/csv",
+            )
+        except Exception as e:
+            st.error(f"Erro na tabulação: {e}")
 
     # ── PLOTS ─────────────────────────────────────────────────────────────────
     if plot_after == "Yes":
