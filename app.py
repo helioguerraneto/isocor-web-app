@@ -265,11 +265,12 @@ def run_tabulate(final: pd.DataFrame, reps: int = 3) -> pd.DataFrame:
     Reshape final into tabulated format.
     Reads metabolites and peak counts directly from final.
     Groups every `reps` consecutive sample columns into one row.
+    Column names: Metabolite, M0_r1, M0_r2, M0_r3, M1_r1, M1_r2, M1_r3, ...
     """
     res = final.copy()
     res["Metabolite"] = res["Metabolite"].ffill()
 
-    # sample columns = everything after Metabolite, Peak index, derivative
+    # sample columns = everything after Metabolite, Peak index, derivative (col 0,1,2)
     sample_cols = list(res.columns[3:])
     n_samples   = len(sample_cols)
     n_rows      = n_samples // reps
@@ -281,10 +282,11 @@ def run_tabulate(final: pd.DataFrame, reps: int = 3) -> pd.DataFrame:
         len(res[res["Metabolite"] == m]) for m in metabolites_order
     )
 
-    # header: Metabolite, then M0(,,), M1(,,), ...
+    # header with unique names: Metabolite, M0_r1, M0_r2, M0_r3, M1_r1, ...
     header = ["Metabolite"]
     for p in range(max_peaks):
-        header += [f"M{p}", "", ""]
+        for r in range(1, reps + 1):
+            header.append(f"M{p}_r{r}")
 
     output_rows = []
     for meta_name in metabolites_order:
@@ -298,7 +300,7 @@ def run_tabulate(final: pd.DataFrame, reps: int = 3) -> pd.DataFrame:
                 if p < n_peaks:
                     row += sub.loc[p, s_names].tolist()
                 else:
-                    row += ["", "", ""]
+                    row += [""] * reps
             output_rows.append(row)
 
     return pd.DataFrame(output_rows, columns=header)
