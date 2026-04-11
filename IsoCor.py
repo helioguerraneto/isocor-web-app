@@ -559,5 +559,45 @@ class gui:
                 break
 
 
-if __name__ == '__main__':
-    gui()
+if __name__ == "__main__":
+    import sys
+    
+    # modo automático
+    if len(sys.argv) > 1:
+        input_file = sys.argv[1]
+        tracer = sys.argv[2]
+        purity = eval(sys.argv[3])
+
+        print("Running IsoCor in CLI mode")
+
+        # =========================
+        # AQUI VOCÊ PRECISA AJUSTAR
+        # =========================
+        # Exemplo genérico:
+        
+        data_iso = {tracer: purity}
+        v_measured = [1, 0, 0]  # substituir leitura real
+        
+        meta_form = "C4H6O4"
+        der_form = ""
+
+        el_excluded = ""
+        el_cor = tracer
+
+        calc_mean_enr = True
+
+        obj = process(
+            data_iso,
+            v_measured,
+            meta_form,
+            der_form,
+            calc_mean_enr,
+            el_excluded,
+            purity,
+            el_cor
+        )
+
+        print("Done")
+    
+    else:
+        gui()  # comportamento original
