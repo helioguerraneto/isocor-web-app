@@ -194,31 +194,57 @@ def run_isocor(outputdataset, isotop, dict_form_meta, dict_form_der,
 
 # ── AFTER: isocor result → wide CSV ──────────────────────────────────────────
 def run_after(dataset: pd.DataFrame, corrected: pd.DataFrame, samplenames: list):
-    """Replicates after.py exactly."""
-    data    = dataset.iloc[:, 2:].apply(pd.to_numeric, errors="coerce")
-    samplenum = data.shape[1]
-    mult    = corrected.shape[0] // samplenum
+    """
+    Replicates after.py exactly, matching offline output format:
+      col0: Metabolite  (name only on first row of each compound block, NaN elsewhere)
+      col1: Peak index  (0,1,2,3,4...)
+      col2: derivative column from original CSV (NaN for most metabolomics datasets)
+      col3+: one column per sample
+    """
+    samplenum = len(samplenames)
+    mult = corrected.shape[0] // samplenum
 
-    # columns 1,2,4 (0-indexed) of corrected = metabolite, derivative, isotopologue_fraction
-    tempoutput = corrected.iloc[0:mult, [1, 2, 4]].copy().reset_index(drop=True)
+    # --- build the first-sample block: Metabolite + Peak index + fraction ---
+    # Our corrected df columns: sample, metabolite, derivative, isotopologue,
+    #                           isotopologue_fraction, residuum, mean_enrichment, error
+    first_block = corrected.iloc[0:mult].copy().reset_index(drop=True)
 
-    for j in range(2, samplenum + 1):
-        start = (j - 1) * mult
-        end   = j * mult
-        col   = corrected.iloc[start:end, 4].reset_index(drop=True)
-        tempoutput = pd.concat([tempoutput, col], axis=1)
+    # Metabolite: name only on first row of each compound, NaN elsewhere
+    # (replicates R / offline behavior)
+    meta_col = first_block["metabolite"].copy()
+    seen_meta = None
+    for i in range(len(meta_col)):
+        if meta_col.iloc[i] == seen_meta:
+            meta_col.iloc[i] = np.nan
+        else:
+            seen_meta = meta_col.iloc[i]
 
-    tempoutput2 = pd.concat([
-        tempoutput.iloc[:, 0:2].reset_index(drop=True),
-        dataset.iloc[:, 1:2].reset_index(drop=True),
-        tempoutput.iloc[:, 2:].reset_index(drop=True),
+    peak_index = first_block["isotopologue"].values          # 0,1,2,...
+    fraction_s1 = first_block["isotopologue_fraction"].values
+
+    tempoutput = pd.DataFrame({
+        "Metabolite": meta_col.values,
+        "Peak index": peak_index,
+        samplenames[0]: fraction_s1,
+    })
+
+    # --- append remaining samples ---
+    for j in range(1, samplenum):
+        start = j * mult
+        end   = (j + 1) * mult
+        col = corrected.iloc[start:end]["isotopologue_fraction"].reset_index(drop=True)
+        tempoutput[samplenames[j]] = col.values
+
+    # --- insert derivative column (col2 of original dataset) ---
+    der_col = dataset.iloc[:mult, 1].reset_index(drop=True)
+
+    final = pd.concat([
+        tempoutput.iloc[:, :2].reset_index(drop=True),   # Metabolite, Peak index
+        der_col,                                          # derivative (Unnamed: 1 / NaN)
+        tempoutput.iloc[:, 2:].reset_index(drop=True),   # sample columns
     ], axis=1)
 
-    tempoutput2.columns = list(tempoutput2.columns[:3]) + samplenames
-
-    # col_index 2 is numeric — leave NaN as-is (no string replacement needed)
-
-    return tempoutput2
+    return final
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="IsoCor Online", layout="centered")
