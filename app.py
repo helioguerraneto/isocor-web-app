@@ -270,7 +270,7 @@ def figs_to_pdf(figs: list) -> bytes:
     return buf.read()
 
 # ── TABULATE: _res.csv → _res_tabu.csv ───────────────────────────────────────
-def run_tabulate(final: pd.DataFrame, reps: int = 3) -> pd.DataFrame:
+def run_tabulate(final: pd.DataFrame, dataset_original: pd.DataFrame, reps: int = 3) -> pd.DataFrame:
     import re
 
     df = final.copy()
@@ -282,19 +282,38 @@ def run_tabulate(final: pd.DataFrame, reps: int = 3) -> pd.DataFrame:
     n_samples   = len(sample_cols)
     n_rows      = n_samples // reps
 
-    # build condition list dynamically from sample count
-    # (user can override via reps; conditions are positional)
     todas_linhas = []
 
     for metabolito in df["Metabolite"].unique():
         dados_metab = df[df["Metabolite"] == metabolito].copy()
         dados_metab = dados_metab.sort_values("Peak index").reset_index(drop=True)
 
+        # --- NOVO: Buscar metadados no arquivo original ---
+        # Encontra a primeira linha onde este metabólito aparece no dataset original
+        mask_meta = dataset_original.iloc[:, 0].astype(str).str.strip() == metabolito
+        if mask_meta.any():
+            # Pega os valores das colunas de metadados (A=Time, B=Cys, C=Genotype)
+            # Nota: dataset_original tem colunas: A(Metabolite), B(Time), C(Cys), D(Genotype)
+            row_idx = mask_meta.idxmax()
+            time_val = dataset_original.iloc[row_idx, 1]  # Coluna B
+            cys_val  = dataset_original.iloc[row_idx, 2]  # Coluna C
+            geno_val = dataset_original.iloc[row_idx, 3]  # Coluna D
+        else:
+            time_val = cys_val = geno_val = ""
+        # -------------------------------------------------
+
         for idx_cond in range(n_rows):
             inicio = idx_cond * reps
             samples_cond = sample_cols[inicio : inicio + reps]
 
-            linha = {"Metabolite": metabolito}
+            # --- NOVO: Adicionar colunas de metadados na linha ---
+            linha = {
+                "Metabolite": metabolito,
+                "Time": time_val,
+                "Cys": cys_val,
+                "Genotype": geno_val
+            }
+            # -------------------------------------------------
 
             for _, row in dados_metab.iterrows():
                 peak_idx = int(row["Peak index"])
@@ -307,12 +326,12 @@ def run_tabulate(final: pd.DataFrame, reps: int = 3) -> pd.DataFrame:
 
     df_result = pd.DataFrame(todas_linhas).fillna("")
 
-    # sort columns: Metabolite first, then M0_r1, M0_r2, M0_r3, M1_r1, ...
+    # sort columns: Metabolite, Time, Cys, Genotype first, then M0_r1, M0_r2...
     def sort_peak_col(col):
         match = re.match(r"M(\d+)_r(\d+)", col)
         return (int(match.group(1)), int(match.group(2))) if match else (999, 999)
 
-    colunas_fixas = ["Metabolite"]
+    colunas_fixas = ["Metabolite", "Time", "Cys", "Genotype"]
     colunas_peaks = sorted(
         [c for c in df_result.columns if c not in colunas_fixas],
         key=sort_peak_col,
@@ -407,7 +426,7 @@ if uploaded_file and st.button("▶ Run IsoCor", type="primary"):
 
     # ── build tabu directly from final ───────────────────────────────────────
     try:
-        tabu = run_tabulate(final, reps=int(reps_input))
+        tabu = run_tabulate(final, dataset, reps=int(reps_input))
     except Exception as e:
         tabu = None
         st.warning(f"Tabulação falhou: {e}")
