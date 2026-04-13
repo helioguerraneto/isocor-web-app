@@ -283,31 +283,33 @@ def run_tabulate(final: pd.DataFrame, reps: int = 3) -> pd.DataFrame:
     n_conditions = n_samples // reps
 
     # Definir as condições experimentais na ordem correta
-    # Baseado no arquivo COMOEUQUEROI_res_tabu.xlsx
     conditions = [
-        # 0h
+        # 0h - Cys
         {"Time": "0h", "Cys": "Cys", "Genotype": "Control"},
         {"Time": "0h", "Cys": "Cys", "Genotype": "PKM1ko1"},
         {"Time": "0h", "Cys": "Cys", "Genotype": "PKM1ko2"},
         {"Time": "0h", "Cys": "Cys", "Genotype": "PKM1ko3"},
+        # 0h - no cys
         {"Time": "0h", "Cys": "no cys", "Genotype": "Control"},
         {"Time": "0h", "Cys": "no cys", "Genotype": "PKM1ko1"},
         {"Time": "0h", "Cys": "no cys", "Genotype": "PKM1ko2"},
         {"Time": "0h", "Cys": "no cys", "Genotype": "PKM1ko3"},
-        # 6h
+        # 6h - Cys
         {"Time": "6h", "Cys": "Cys", "Genotype": "Control"},
         {"Time": "6h", "Cys": "Cys", "Genotype": "PKM1ko1"},
         {"Time": "6h", "Cys": "Cys", "Genotype": "PKM1ko2"},
         {"Time": "6h", "Cys": "Cys", "Genotype": "PKM1ko3"},
+        # 6h - no cys
         {"Time": "6h", "Cys": "no cys", "Genotype": "Control"},
         {"Time": "6h", "Cys": "no cys", "Genotype": "PKM1ko1"},
         {"Time": "6h", "Cys": "no cys", "Genotype": "PKM1ko2"},
         {"Time": "6h", "Cys": "no cys", "Genotype": "PKM1ko3"},
-        # 24h
+        # 24h - Cys
         {"Time": "24h", "Cys": "Cys", "Genotype": "Control"},
         {"Time": "24h", "Cys": "Cys", "Genotype": "PKM1ko1"},
         {"Time": "24h", "Cys": "Cys", "Genotype": "PKM1ko2"},
         {"Time": "24h", "Cys": "Cys", "Genotype": "PKM1ko3"},
+        # 24h - no cys
         {"Time": "24h", "Cys": "no cys", "Genotype": "Control"},
         {"Time": "24h", "Cys": "no cys", "Genotype": "PKM1ko1"},
         {"Time": "24h", "Cys": "no cys", "Genotype": "PKM1ko2"},
@@ -324,7 +326,6 @@ def run_tabulate(final: pd.DataFrame, reps: int = 3) -> pd.DataFrame:
             inicio = idx_cond * reps
             samples_cond = sample_cols[inicio : inicio + reps]
             
-            # Pegar os metadados da condição atual
             cond = conditions[idx_cond]
             
             linha = {
@@ -345,7 +346,6 @@ def run_tabulate(final: pd.DataFrame, reps: int = 3) -> pd.DataFrame:
 
     df_result = pd.DataFrame(todas_linhas).fillna("")
 
-    # Ordenar colunas
     def sort_peak_col(col):
         match = re.match(r"M(\d+)_r(\d+)", col)
         return (int(match.group(1)), int(match.group(2))) if match else (999, 999)
@@ -356,17 +356,8 @@ def run_tabulate(final: pd.DataFrame, reps: int = 3) -> pd.DataFrame:
         key=sort_peak_col,
     )
     
-    # Preencher células vazias nas colunas de metadados (estilo "tidy" com repetição)
-    # Isso replica o comportamento do COMOEUQUEROI onde só a primeira linha tem os valores
-    result = df_result[colunas_fixas + colunas_peaks].copy()
-    
-    # Opcional: se quiser exatamente como COMOEUQUEROI (valores só na primeira linha de cada grupo)
-    for col in ["Time", "Cys", "Genotype"]:
-        mask = result["Metabolite"] != result["Metabolite"].shift(1)
-        result.loc[~mask, col] = ""
-    
-    return result
-
+    # REMOVIDA a parte que apagava os valores!
+    return df_result[colunas_fixas + colunas_peaks]
 # ── UI ────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="IsoCor Online", layout="centered")
 st.title("IsoCor Online")
