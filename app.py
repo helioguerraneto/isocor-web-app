@@ -279,22 +279,60 @@ def run_tabulate(final: pd.DataFrame, reps: int = 3) -> pd.DataFrame:
     df["Peak index"] = df["Peak index"].astype(int)
 
     sample_cols = list(df.columns[3:])
-    n_samples   = len(sample_cols)
-    n_rows      = n_samples // reps
+    n_samples = len(sample_cols)
+    n_conditions = n_samples // reps
 
-    # build condition list dynamically from sample count
-    # (user can override via reps; conditions are positional)
+    # Definir as condições experimentais na ordem correta
+    # Baseado no arquivo COMOEUQUEROI_res_tabu.xlsx
+    conditions = [
+        # 0h
+        {"Time": "0h", "Cys": "Cys", "Genotype": "Control"},
+        {"Time": "0h", "Cys": "Cys", "Genotype": "PKM1ko1"},
+        {"Time": "0h", "Cys": "Cys", "Genotype": "PKM1ko2"},
+        {"Time": "0h", "Cys": "Cys", "Genotype": "PKM1ko3"},
+        {"Time": "0h", "Cys": "no cys", "Genotype": "Control"},
+        {"Time": "0h", "Cys": "no cys", "Genotype": "PKM1ko1"},
+        {"Time": "0h", "Cys": "no cys", "Genotype": "PKM1ko2"},
+        {"Time": "0h", "Cys": "no cys", "Genotype": "PKM1ko3"},
+        # 6h
+        {"Time": "6h", "Cys": "Cys", "Genotype": "Control"},
+        {"Time": "6h", "Cys": "Cys", "Genotype": "PKM1ko1"},
+        {"Time": "6h", "Cys": "Cys", "Genotype": "PKM1ko2"},
+        {"Time": "6h", "Cys": "Cys", "Genotype": "PKM1ko3"},
+        {"Time": "6h", "Cys": "no cys", "Genotype": "Control"},
+        {"Time": "6h", "Cys": "no cys", "Genotype": "PKM1ko1"},
+        {"Time": "6h", "Cys": "no cys", "Genotype": "PKM1ko2"},
+        {"Time": "6h", "Cys": "no cys", "Genotype": "PKM1ko3"},
+        # 24h
+        {"Time": "24h", "Cys": "Cys", "Genotype": "Control"},
+        {"Time": "24h", "Cys": "Cys", "Genotype": "PKM1ko1"},
+        {"Time": "24h", "Cys": "Cys", "Genotype": "PKM1ko2"},
+        {"Time": "24h", "Cys": "Cys", "Genotype": "PKM1ko3"},
+        {"Time": "24h", "Cys": "no cys", "Genotype": "Control"},
+        {"Time": "24h", "Cys": "no cys", "Genotype": "PKM1ko1"},
+        {"Time": "24h", "Cys": "no cys", "Genotype": "PKM1ko2"},
+        {"Time": "24h", "Cys": "no cys", "Genotype": "PKM1ko3"},
+    ]
+
     todas_linhas = []
 
     for metabolito in df["Metabolite"].unique():
         dados_metab = df[df["Metabolite"] == metabolito].copy()
         dados_metab = dados_metab.sort_values("Peak index").reset_index(drop=True)
 
-        for idx_cond in range(n_rows):
+        for idx_cond in range(n_conditions):
             inicio = idx_cond * reps
             samples_cond = sample_cols[inicio : inicio + reps]
-
-            linha = {"Metabolite": metabolito}
+            
+            # Pegar os metadados da condição atual
+            cond = conditions[idx_cond]
+            
+            linha = {
+                "Metabolite": metabolito,
+                "Time": cond["Time"],
+                "Cys": cond["Cys"],
+                "Genotype": cond["Genotype"]
+            }
 
             for _, row in dados_metab.iterrows():
                 peak_idx = int(row["Peak index"])
@@ -307,17 +345,27 @@ def run_tabulate(final: pd.DataFrame, reps: int = 3) -> pd.DataFrame:
 
     df_result = pd.DataFrame(todas_linhas).fillna("")
 
-    # sort columns: Metabolite first, then M0_r1, M0_r2, M0_r3, M1_r1, ...
+    # Ordenar colunas
     def sort_peak_col(col):
         match = re.match(r"M(\d+)_r(\d+)", col)
         return (int(match.group(1)), int(match.group(2))) if match else (999, 999)
 
-    colunas_fixas = ["Metabolite"]
+    colunas_fixas = ["Metabolite", "Time", "Cys", "Genotype"]
     colunas_peaks = sorted(
         [c for c in df_result.columns if c not in colunas_fixas],
         key=sort_peak_col,
     )
-    return df_result[colunas_fixas + colunas_peaks]
+    
+    # Preencher células vazias nas colunas de metadados (estilo "tidy" com repetição)
+    # Isso replica o comportamento do COMOEUQUEROI onde só a primeira linha tem os valores
+    result = df_result[colunas_fixas + colunas_peaks].copy()
+    
+    # Opcional: se quiser exatamente como COMOEUQUEROI (valores só na primeira linha de cada grupo)
+    for col in ["Time", "Cys", "Genotype"]:
+        mask = result["Metabolite"] != result["Metabolite"].shift(1)
+        result.loc[~mask, col] = ""
+    
+    return result
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 st.set_page_config(page_title="IsoCor Online", layout="centered")
